@@ -33,18 +33,22 @@ type EventStore struct {
 	shutdown        bool
 	eventController cache.Controller
 	eventStore      cache.Store
+	dropType        []string
+	dropReason      []string
 	backoff         *Backoff
 	events          *prometheus.Desc
 }
 
 // NewEventStore returns EventStore or error
-func NewEventStore(client kubernetes.Interface, init, max time.Duration, namespace string) *EventStore {
+func NewEventStore(client kubernetes.Interface, dropType, dropReason string, init, max time.Duration, namespace string) *EventStore {
 	es := &EventStore{
 		client:  client,
 		stopCh:  make(chan struct{}),
+		dropType:   strings.Split(dropType, ","),
+		dropReason: strings.Split(dropReason, ","),
 		backoff: NewBackoff(init, max),
 		events: prometheus.NewDesc(
-			"kubernetes_events",
+			"kubernetes_pod_events",
 			"State of kubernetes events",
 			[]string{"event_metaname", "event_namespace", "event_name", "event_kind", "event_reason", "event_type", "event_subobject", "event_message", "event_source"},
 			nil,
@@ -144,19 +148,42 @@ func (es *EventStore) Scrap(ch chan<- prometheus.Metric) {
 			continue
 		}
 		event := obj.(*core_v1.Event)
-		ch <- prometheus.MustNewConstMetric(
-			es.events, prometheus.GaugeValue,
-			eval(isHappening),
-			event.ObjectMeta.Name,
-			event.InvolvedObject.Namespace,
-			event.InvolvedObject.Name,
-			event.InvolvedObject.Kind,
-			event.Reason,
-			event.Type,
-			event.InvolvedObject.FieldPath,
-			event.Message,
-			fmt.Sprintf("%s/%s", event.Source.Host, event.Source.Component),
-		)
+
+		dropEvent := false
+
+		for _, dType := range es.dropType {
+			if event != nil {
+				if event.Type == dType {
+					dropEvent = true
+					continue
+				}
+			}
+		}
+
+		for _, dReason := range es.dropReason {
+			if event != nil {
+				if event.Reason == dReason {
+					dropEvent = true
+					continue
+				}
+			}
+		}
+
+		if dropEvent == false {
+			ch <- prometheus.MustNewConstMetric(
+				es.events, prometheus.GaugeValue,
+				eval(isHappening),
+				event.ObjectMeta.Name,
+				event.InvolvedObject.Namespace,
+				event.InvolvedObject.Name,
+				event.InvolvedObject.Kind,
+				event.Reason,
+				event.Type,
+				event.InvolvedObject.FieldPath,
+				event.Message,
+				fmt.Sprintf("%s/%s", event.Source.Host, event.Source.Component),
+			)
+		}
 	}
 	es.backoff.GC()
 }

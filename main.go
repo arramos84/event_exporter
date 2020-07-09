@@ -37,6 +37,14 @@ var (
 		"event.init-length", 20,
 		"Lower bound duration(sec) of an event to preserve",
 	)
+	dropType = pflag.String(
+		"event.drop-type", "",
+		"Event types to drop",
+	)
+	dropReason = pflag.String(
+		"event.drop-reason", "",
+		"Event reasons to drop",
+	)
 	kubeNamespace = pflag.String(
 		"namespace", core_v1.NamespaceAll,
 		"Optional, the namespace to watch (default all)",
@@ -69,15 +77,17 @@ func init() {
 }
 
 func main() {
-	config, err := clientcmd.BuildConfigFromFlags(*apiserver, *kubeConfig)
+	kConfig, err := clientcmd.BuildConfigFromFlags(*apiserver, *kubeConfig)
 	if err != nil {
 		klog.Fatalf("build kubeconfig: %v", err)
 	}
-	client, err := kubernetes.NewForConfig(config)
+	client, err := kubernetes.NewForConfig(kConfig)
 	if err != nil {
 		klog.Fatalln("create client:", err)
 	}
 	store := NewEventStore(client,
+		*dropType,
+		*dropReason,
 		time.Duration(*initPreserve)*time.Second,
 		time.Duration(*maxPreserve)*time.Second,
 		*kubeNamespace)
